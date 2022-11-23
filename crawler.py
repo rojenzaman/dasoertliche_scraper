@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 
+import re
 import json
 import requests
 from time import sleep
 
 from fake_useragent import UserAgent
 import lxml.html
+
+EMAIL_REGEX = re.compile(r'[^@]+@[^@]+\.[^@]+')
 
 
 def german_postalcodes():
@@ -31,12 +34,19 @@ def parse_details(content):
 
     for m in mail:
         if len(m.xpath('./@title')) > 0:
-            contact_data['mailAddress'] = m.xpath('./@title')[0]
+            mail_address = m.xpath('./@title')[0].lower()
+
+            if not EMAIL_REGEX.fullmatch(mail_address):
+                continue
+
+            contact_data['mailAddress'] = mail_address
+
             break
 
     for w in web:
         if len(w.xpath('./@title')) > 0:
-            contact_data['website'] = w.xpath('./@title')[0]
+            contact_data['website'] = w.xpath('./@title')[0].lower()
+
             break
 
     if 'mailAddress' not in contact_data:
@@ -45,7 +55,6 @@ def parse_details(content):
     if 'website' not in contact_data:
         contact_data['website'] = ''
 
-    print(contact_data)
     return contact_data
 
 
@@ -100,7 +109,7 @@ def main():
     for postal_code in postal_codes:
         param = 'kw={}&ci={}&form_name=search_nat'.format(query, postal_code)
         url = 'https://www.dasoertliche.de?{}'.format(param)
-        print(url)
+        print('start parsing {}'.format(url))
 
         results = []
 
@@ -114,19 +123,38 @@ def main():
                 site_details = download_site(item['url'], headers)
                 details = parse_details(site_details)
 
-                item.pop('url')
-                item.pop('@type')
-                item['geo'].pop('@type')
-                item['address'].pop('@type')
+                keys = ['url', 'geo', 'address']
+
+                if all(i not in item for i in keys):
+                    print('abort parsing listings for {}'.format(postal_code))
+                    print()
+
+                    break
 
                 item.pop('aggregateRating') if 'aggregateRating' in item else item
 
-                item['geo']['latitude'] = float(item['geo']['latitude'])
-                item['geo']['longitude'] = float(item['geo']['longitude'])
+                item['coordinates'] = []
+                item['coordinates'].append(float(item['geo']['latitude']))
+                item['coordinates'].append(float(item['geo']['longitude']))
+
+                try:
+                    listing_postal_code = int(item['address']['postalCode'])
+                    item['address']['postalCode'] = listing_postal_code
+                except:
+                    pass
 
                 item['telephone'] = item['telephone'].replace(' ', '')
 
-                results.append({**item, **details})
+                item.pop('url')
+                item.pop('geo')
+                item.pop('@type')
+                item['address'].pop('@type')
+
+                entry = {**item, **details}
+                results.append(entry)
+
+                print(entry)
+                print()
 
                 sleep(1)
 
@@ -140,6 +168,8 @@ def main():
             if len(results) <= total_hists and url is not None:
                 site_listings = download_site(url, headers)
             else:
+                print('Reached end of end of scraping process')
+
                 break
 
 
