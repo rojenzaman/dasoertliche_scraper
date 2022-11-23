@@ -8,6 +8,18 @@ from fake_useragent import UserAgent
 import lxml.html
 
 
+def german_postalcodes():
+    postal_codes = []
+
+    with open('data/german_postalcodes.geojson', 'r') as f:
+        d = json.load(f)
+
+        for feature in d['features']:
+            postal_codes.append(feature['properties']['postcode'])
+
+    return postal_codes
+
+
 def parse_details(content):
     doc = lxml.html.fromstring(content)
     contact = doc.xpath('//div[@class="lnks"]')
@@ -49,7 +61,12 @@ def parse_hits(content):
     doc = lxml.html.fromstring(content)
     h = doc.xpath('//span[@class="sttrefferanz"]/text()')
 
-    return int(h[0])
+    if len(h) > 0:
+        l = int(h[0])
+    else:
+        l = 0
+
+    return l
 
 
 def parse_iteration(content):
@@ -76,46 +93,54 @@ def download_site(url, headers):
 def main():
     ua = UserAgent()
     headers = { 'User-Agent': ua.random }
+    query = 'Hausverwaltungen'
 
-    results = []
+    postal_codes = german_postalcodes()
 
-    url = 'https://www.dasoertliche.de/Themen/Hausverwaltungen/Hamburg.html'
-    site_listings = download_site(url, headers)
-    total_hists = parse_hits(site_listings)
+    for postal_code in postal_codes:
+        param = 'kw={}&ci={}&form_name=search_nat'.format(query, postal_code)
+        url = 'https://www.dasoertliche.de?{}'.format(param)
+        print(url)
 
-    while True:
-        listings = parse_listings(site_listings)
+        results = []
 
-        for item in listings:
-            site_details = download_site(item['url'], headers)
-            details = parse_details(site_details)
+        site_listings = download_site(url, headers)
+        total_hists = parse_hits(site_listings)
 
-            item.pop('url')
-            item.pop('@type')
-            item['geo'].pop('@type')
-            item['address'].pop('@type')
+        while total_hists > 0:
+            listings = parse_listings(site_listings)
 
-            item.pop('aggregateRating') if 'aggregateRating' in item else item
+            for item in listings:
+                site_details = download_site(item['url'], headers)
+                details = parse_details(site_details)
 
-            item['geo']['latitude'] = float(item['geo']['latitude'])
-            item['geo']['longitude'] = float(item['geo']['longitude'])
+                item.pop('url')
+                item.pop('@type')
+                item['geo'].pop('@type')
+                item['address'].pop('@type')
 
-            item['telephone'] = item['telephone'].replace(' ', '')
+                item.pop('aggregateRating') if 'aggregateRating' in item else item
 
-            results.append({**item, **details})
+                item['geo']['latitude'] = float(item['geo']['latitude'])
+                item['geo']['longitude'] = float(item['geo']['longitude'])
 
-            sleep(1)
+                item['telephone'] = item['telephone'].replace(' ', '')
 
+                results.append({**item, **details})
 
-        with open('query_results_new02.json', 'a', encoding='utf-8') as f:
-            json.dump(results, f, ensure_ascii=False)
+                sleep(1)
 
-        url = parse_iteration(site_listings)
+            output = 'data/{}.json'.format(postal_code)
 
-        if len(results) <= total_hists and url is not None:
-            site_listings = download_site(url, headers)
-        else:
-            break
+            with open(output, 'a', encoding='utf-8') as f:
+                json.dump(results, f, ensure_ascii=False)
+
+            url = parse_iteration(site_listings)
+
+            if len(results) <= total_hists and url is not None:
+                site_listings = download_site(url, headers)
+            else:
+                break
 
 
 if __name__ == '__main__':
