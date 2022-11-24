@@ -140,7 +140,7 @@ def aggregate(query, postal_code):
             item['coordinates'].append(float(item['geo']['longitude']))
 
             try:
-                listing_postal_code = f'{item['address']['postalCode']:05d}'
+                listing_postal_code = f'{item["address"]["postalCode"]:05d}'
                 item['address']['postalCode'] = listing_postal_code
             except:
                 pass
