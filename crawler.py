@@ -173,7 +173,7 @@ def aggregate(query, postal_code):
             item.pop('@type')
             item['address'].pop('@type')
 
-            file_name = make_file_name(query, postal_code):
+            file_name = make_file_name(query, postal_code)
             write_json({**item, **details}, file_name)
 
             sleep(1)
