@@ -7,6 +7,7 @@ import lxml.html
 import argparse
 
 from time import sleep
+from requests.exceptions import ConnectionError
 from fake_useragent import UserAgent
 
 EMAIL_REGEX = re.compile(r'[^@]+@[^@]+\.[^@]+')
@@ -96,7 +97,7 @@ def download_site(url, headers):
         r = requests.get(url, headers=headers, cookies={'CONSENT': 'YES+'})
 
         return r.content
-    except http.client.RemoteDisconnected as e:
+    except ConnectionError as e:
         sleep(15)
         download_site(url, headers)
     except Exception as e:
@@ -127,8 +128,7 @@ def aggregate(query, postal_code):
             keys = ['url', 'geo', 'address']
 
             if all(i not in item for i in keys):
-                print('abort parsing listings for {}'.format(postal_code))
-                print()
+                print('abort parsing listings for {}\n\n'.format(postal_code))
 
                 break
 
@@ -157,8 +157,7 @@ def aggregate(query, postal_code):
             entry = {**item, **details}
             results.append(entry)
 
-            print(entry)
-            print()
+            print('{}\n'.format(entry))
 
             sleep(1)
 
@@ -175,6 +174,7 @@ def aggregate(query, postal_code):
         url = parse_iteration(site_listings)
 
         if len(results) <= total_hists and url is not None:
+            print('Next url {}\n'.format(url))
             site_listings = download_site(url, headers)
         else:
             print('Reached end of end of scraping process')
@@ -196,6 +196,7 @@ def main():
             aggregate(args.query, postal_code)
     else:
         aggregate(args.query, '')
+
 
 if __name__ == '__main__':
     main()
