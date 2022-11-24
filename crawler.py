@@ -3,10 +3,12 @@
 import re
 import json
 import requests
-from time import sleep
-
-from fake_useragent import UserAgent
 import lxml.html
+import argparse
+
+from time import sleep
+from lxml import RemoteDisconnected
+from fake_useragent import UserAgent
 
 EMAIL_REGEX = re.compile(r'[^@]+@[^@]+\.[^@]+')
 
@@ -95,83 +97,106 @@ def download_site(url, headers):
         r = requests.get(url, headers=headers, cookies={'CONSENT': 'YES+'})
 
         return r.content
+    except RemoteDisconnected as e:
+        sleep(15)
+        download_site(url, headers)
     except Exception as e:
         print(e)
+        return None
 
 
-def main():
+def aggregate(query, postal_code):
     ua = UserAgent()
     headers = { 'User-Agent': ua.random }
-    query = 'Hausverwaltungen'
 
-    postal_codes = german_postalcodes()
+    param = 'kw={}&ci={}&form_name=search_nat'.format(query, postal_code)
+    url = 'https://www.dasoertliche.de?{}'.format(param)
+    print('start parsing {}\n'.format(url))
 
-    for postal_code in postal_codes:
-        param = 'kw={}&ci={}&form_name=search_nat'.format(query, postal_code)
-        url = 'https://www.dasoertliche.de?{}'.format(param)
-        print('start parsing {}'.format(url))
+    results = []
 
-        results = []
+    site_listings = download_site(url, headers)
+    total_hists = parse_hits(site_listings)
 
-        site_listings = download_site(url, headers)
-        total_hists = parse_hits(site_listings)
+    while total_hists > 0:
+        listings = parse_listings(site_listings)
 
-        while total_hists > 0:
-            listings = parse_listings(site_listings)
+        for item in listings:
+            site_details = download_site(item['url'], headers)
+            details = parse_details(site_details)
 
-            for item in listings:
-                site_details = download_site(item['url'], headers)
-                details = parse_details(site_details)
+            keys = ['url', 'geo', 'address']
 
-                keys = ['url', 'geo', 'address']
-
-                if all(i not in item for i in keys):
-                    print('abort parsing listings for {}'.format(postal_code))
-                    print()
-
-                    break
-
-                item.pop('aggregateRating') if 'aggregateRating' in item else item
-
-                item['coordinates'] = []
-                item['coordinates'].append(float(item['geo']['latitude']))
-                item['coordinates'].append(float(item['geo']['longitude']))
-
-                try:
-                    listing_postal_code = int(item['address']['postalCode'])
-                    item['address']['postalCode'] = listing_postal_code
-                except:
-                    pass
-
-                item['telephone'] = item['telephone'].replace(' ', '')
-
-                item.pop('url')
-                item.pop('geo')
-                item.pop('@type')
-                item['address'].pop('@type')
-
-                entry = {**item, **details}
-                results.append(entry)
-
-                print(entry)
+            if all(i not in item for i in keys):
+                print('abort parsing listings for {}'.format(postal_code))
                 print()
-
-                sleep(1)
-
-            output = 'data/{}.json'.format(postal_code)
-
-            with open(output, 'a', encoding='utf-8') as f:
-                json.dump(results, f, ensure_ascii=False)
-
-            url = parse_iteration(site_listings)
-
-            if len(results) <= total_hists and url is not None:
-                site_listings = download_site(url, headers)
-            else:
-                print('Reached end of end of scraping process')
 
                 break
 
+            item.pop('aggregateRating') if 'aggregateRating' in item else item
+
+            item['coordinates'] = []
+            item['coordinates'].append(float(item['geo']['latitude']))
+            item['coordinates'].append(float(item['geo']['longitude']))
+
+            try:
+                listing_postal_code = f'{item['address']['postalCode']:05d}'
+                item['address']['postalCode'] = listing_postal_code
+            except:
+                pass
+
+            try:
+                item['telephone'] = item['telephone'].replace(' ', '')
+            except:
+                pass
+
+            item.pop('url')
+            item.pop('geo')
+            item.pop('@type')
+            item['address'].pop('@type')
+
+            entry = {**item, **details}
+            results.append(entry)
+
+            print(entry)
+            print()
+
+            sleep(1)
+
+        if postal_code.isnumeric():
+            file_name = '{}_{}'.format(query.lower(), postal_code)
+        else:
+            file_name = '{}'.format(query.lower())
+
+        output = 'data/{}.json'.format(file_name)
+
+        with open(output, 'a', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False)
+
+        url = parse_iteration(site_listings)
+
+        if len(results) <= total_hists and url is not None:
+            site_listings = download_site(url, headers)
+        else:
+            print('Reached end of end of scraping process')
+
+            break
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Simple scraper')
+    parser.add_argument('--query', dest='query', required=True)
+    parser.add_argument('--use-postal-codes', dest='use_postal_codes', action='store_true')
+
+    args = parser.parse_args()
+
+    postal_codes = german_postalcodes()
+
+    if args.use_postal_codes:
+        for postal_code in postal_codes:
+            aggregate(args.query, postal_code)
+    else:
+        aggregate(args.query, '')
 
 if __name__ == '__main__':
     main()
