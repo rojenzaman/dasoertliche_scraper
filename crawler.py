@@ -105,6 +105,25 @@ def download_site(url, headers):
         return None
 
 
+def write_json(entry, file_name):
+    with open(file_name, 'r+', encoding='utf-8') as f:
+        d = json.load(f)
+
+        d.append(entry)
+        f.seek(0)
+
+        json.dump(entry, f, ensure_ascii=False)
+
+
+def make_file_name(query, postal_code):
+    if postal_code.isnumeric():
+        file_name = '{}_{}'.format(query.lower(), postal_code)
+    else:
+        file_name = '{}'.format(query.lower())
+
+    return 'data/{}.json'.format(file_name)
+
+
 def aggregate(query, postal_code):
     ua = UserAgent()
     headers = { 'User-Agent': ua.random }
@@ -154,22 +173,10 @@ def aggregate(query, postal_code):
             item.pop('@type')
             item['address'].pop('@type')
 
-            entry = {**item, **details}
-            results.append(entry)
-
-            print('{}\n'.format(entry))
+            file_name = make_file_name(query, postal_code):
+            write_json({**item, **details}, file_name)
 
             sleep(1)
-
-        if postal_code.isnumeric():
-            file_name = '{}_{}'.format(query.lower(), postal_code)
-        else:
-            file_name = '{}'.format(query.lower())
-
-        output = 'data/{}.json'.format(file_name)
-
-        with open(output, 'a', encoding='utf-8') as f:
-            json.dump(results, f, ensure_ascii=False)
 
         url = parse_iteration(site_listings)
 
@@ -178,8 +185,6 @@ def aggregate(query, postal_code):
             site_listings = download_site(url, headers)
         else:
             print('Reached end of end of scraping process')
-
-            break
 
 
 def main():
