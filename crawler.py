@@ -7,7 +7,6 @@ import lxml.html
 import argparse
 
 from time import sleep
-from lxml import RemoteDisconnected
 from fake_useragent import UserAgent
 
 EMAIL_REGEX = re.compile(r'[^@]+@[^@]+\.[^@]+')
@@ -97,7 +96,7 @@ def download_site(url, headers):
         r = requests.get(url, headers=headers, cookies={'CONSENT': 'YES+'})
 
         return r.content
-    except RemoteDisconnected as e:
+    except http.client.RemoteDisconnected as e:
         sleep(15)
         download_site(url, headers)
     except Exception as e:
