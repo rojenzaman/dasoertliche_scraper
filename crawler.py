@@ -25,7 +25,7 @@ def german_postalcodes():
     return postal_codes
 
 
-def parse_details(content):
+def parse_entry_details(content):
     doc = lxml.html.fromstring(content)
     contact = doc.xpath('//div[@class="lnks"]')
 
@@ -60,7 +60,7 @@ def parse_details(content):
     return contact_data
 
 
-def parse_listings(content):
+def parse_entries(content):
     doc = lxml.html.fromstring(content)
     d = doc.xpath('//script[@type="application/ld+json"]/text()')
     j = json.loads(d[0])
@@ -80,7 +80,7 @@ def parse_hits(content):
     return l
 
 
-def parse_iteration(content):
+def parse_next_url(content):
     doc = lxml.html.fromstring(content)
     n = doc.xpath('//a[@title="zur nächsten Seite"]/@href')
 
@@ -92,27 +92,35 @@ def parse_iteration(content):
     return url
 
 
-def download_site(url, headers):
+def download_document(url, headers):
     try:
         r = requests.get(url, headers=headers, cookies={'CONSENT': 'YES+'})
 
         return r.content
     except ConnectionError as e:
         sleep(15)
-        download_site(url, headers)
+        download_document(url, headers)
     except Exception as e:
         print(e)
         return None
 
 
 def write_json(entry, file_name):
-    with open(file_name, 'r+', encoding='utf-8') as f:
-        d = json.load(f)
+    try:
+        with open(file_name, 'r+', encoding='utf-8') as f:
+            d = json.load(f)
 
-        d.append(entry)
-        f.seek(0)
+            d['entries'].append(entry)
+            f.seek(0)
 
-        json.dump(entry, f, ensure_ascii=False)
+            json.dump(d, f, ensure_ascii=False)
+    except FileNotFoundError as e:
+        d = {
+            'entries': [entry]
+        }
+
+        with open(file_name, 'w', encoding='utf-8') as f:
+            json.dump(d, f, ensure_ascii=False)
 
 
 def make_file_name(query, postal_code):
@@ -124,83 +132,90 @@ def make_file_name(query, postal_code):
     return 'data/{}.json'.format(file_name)
 
 
-def aggregate(query, postal_code):
+def parse_entry(item):
+    item.pop('aggregateRating') if 'aggregateRating' in item else item
+
+    item['coordinates'] = []
+    item['coordinates'].append(float(item['geo']['latitude']))
+    item['coordinates'].append(float(item['geo']['longitude']))
+
+    try:
+        listing_postal_code = f'{item["address"]["postalCode"]:05d}'
+        item['address']['postalCode'] = listing_postal_code
+    except:
+        pass
+
+    try:
+        item['telephone'] = item['telephone'].replace(' ', '')
+    except:
+        pass
+
+    item.pop('url')
+    item.pop('geo')
+    item.pop('@type')
+    item['address'].pop('@type')
+
+    return item
+
+
+def aggregate(query, offset_value, postal_code):
+    file_name = make_file_name(query, postal_code)
+
     ua = UserAgent()
     headers = { 'User-Agent': ua.random }
 
     param = 'kw={}&ci={}&form_name=search_nat'.format(query, postal_code)
     url = 'https://www.dasoertliche.de?{}'.format(param)
-    print('start parsing {}\n'.format(url))
 
-    results = []
+    if offset_value:
+        url = '{}&recFrom={}'.format(url, offset_value)
 
-    site_listings = download_site(url, headers)
-    total_hists = parse_hits(site_listings)
+    while True:
+        print('Next url {}\n'.format(url))
+        document_tree = download_document(url, headers)
+        entries = parse_entries(document_tree)
 
-    while total_hists > 0:
-        listings = parse_listings(site_listings)
-
-        for item in listings:
-            site_details = download_site(item['url'], headers)
-            details = parse_details(site_details)
-
+        for entry in entries:
             keys = ['url', 'geo', 'address']
 
-            if all(i not in item for i in keys):
-                print('abort parsing listings for {}\n\n'.format(postal_code))
+            if all(i not in entry for i in keys):
+                continue
 
-                break
+            print('Detail url {}'.format(entry['url']))
+            entry_details = download_document(entry['url'], headers)
+            entry_details_parsed = parse_entry_details(entry_details)
+            entry_parsed = parse_entry(entry)
 
-            item.pop('aggregateRating') if 'aggregateRating' in item else item
-
-            item['coordinates'] = []
-            item['coordinates'].append(float(item['geo']['latitude']))
-            item['coordinates'].append(float(item['geo']['longitude']))
-
-            try:
-                listing_postal_code = f'{item["address"]["postalCode"]:05d}'
-                item['address']['postalCode'] = listing_postal_code
-            except:
-                pass
-
-            try:
-                item['telephone'] = item['telephone'].replace(' ', '')
-            except:
-                pass
-
-            item.pop('url')
-            item.pop('geo')
-            item.pop('@type')
-            item['address'].pop('@type')
-
-            file_name = make_file_name(query, postal_code)
-            write_json({**item, **details}, file_name)
-
+            write_json({**entry_parsed, **entry_details_parsed}, file_name)
             sleep(1)
 
-        url = parse_iteration(site_listings)
+        url = parse_next_url(document_tree)
+        print('\n\n')
 
-        if len(results) <= total_hists and url is not None:
-            print('Next url {}\n'.format(url))
-            site_listings = download_site(url, headers)
-        else:
-            print('Reached end of end of scraping process')
+        if url is None:
+            break
 
 
 def main():
     parser = argparse.ArgumentParser(description='Simple scraper')
+    parser.add_argument('--offset', dest='offset', type=int)
     parser.add_argument('--query', dest='query', required=True)
     parser.add_argument('--use-postal-codes', dest='use_postal_codes', action='store_true')
 
     args = parser.parse_args()
 
-    postal_codes = german_postalcodes()
-
     if args.use_postal_codes:
+        postal_codes = german_postalcodes()
+
         for postal_code in postal_codes:
-            aggregate(args.query, postal_code)
+            aggregate(args.query, -1, postal_code)
     else:
-        aggregate(args.query, '')
+        if 'offset' in args:
+            offset_value = args.offset
+        else:
+            offset_value = -1
+
+        aggregate(args.query, offset_value, '')
 
 
 if __name__ == '__main__':
