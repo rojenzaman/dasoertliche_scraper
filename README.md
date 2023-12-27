@@ -5,7 +5,7 @@ Simple scraper to fetch some listings from a given topic on dasoertliche.de
 
 ## Why?
 
-Actually the main reason which motivated me, was to get local landlords from a specific city. I wanted to get in touch with them to apply for any flat near by. Well, I can tell you that it worked out pretty well. Probably someone will find this helpful as well. At the moment the data is stored locally in a json file in the data directory.
+Actually the main reason which motivated me, was to get local landlords from a specific city. I wanted to get in touch with them to apply for any flat near by. Well, I can tell you that it worked out pretty well. Probably someone will find this helpful as well. At the moment the data is stored locally in a json file in the data directory which is ignored by git.
 
 
 ### setup
@@ -21,37 +21,32 @@ pip install -r requirements.txt
 
 ### how to use
 
-Before running the script activate the virtual environment
+Before running the script activate the virtual environment. You can query for anything which might interest you.
+
 
 ```sh
-source venv/bin/activate
+pyhhon crawler.py --query Hausverwaltung --offset 5 --postal-code 10963
 ```
 
-First decide which topic you want to scrape
+If you do not wish to get results with an offset
 
 ```sh
-python3 crawler.py --query Hausverwaltung
+pyhhon crawler.py --query Hausverwaltung --postal-code 10963
 ```
 
-If you just want scrape all postal codes use this
+If you do not wish to get any results from a specific postal code you might not use the `--postal-code` option.
 
 ```sh
-python3 crawler.py --query Immobilien --use-postal-codes
-```
-
-If you just want to get results with an offset, use it
-
-```sh
-python3 crawler.py --query Ferienwohnung --offset 276
+pyhhon crawler.py --query Hausverwaltung
 ```
 
 
 ### logging
 
-well there is not any neat logging, instead some simple process output
+Well there is not any neat logging, instead some simple process output
 
 ```
-Next url https://www.dasoertliche.de/?kw=Ferienwohnung&ci=&form_name=search_nat&recFrom=276
+Next url https://www.dasoertliche.de/?kw=Ferienwohnung&ci=&form_name=search_nat&recFrom=5
 
 Detail url https://www.dasoertliche.de/Themen/Astra-Hotel-Kaiserslautern-Inh-Ingeborg-Weismantel-Kaiserslautern-Innenstadt-Rudolf-Breitscheid-Str
 Detail url https://www.dasoertliche.de/Themen/Atalay-Ferienwohnung-Bad-Reichenhall-Karlstein-Am-Schroffen

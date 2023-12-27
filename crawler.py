@@ -2,37 +2,31 @@
 
 import re
 import json
-import requests
-import lxml.html
-import argparse
+import httpx
+import click
 
-from time import sleep
-from requests.exceptions import ConnectionError
+from lxml import html
+from pathlib import Path
 from fake_useragent import UserAgent
+from time import sleep
 
 EMAIL_REGEX = re.compile(r'[^@]+@[^@]+\.[^@]+')
 
 
-def german_postalcodes():
-    postal_codes = []
-
-    with open('data/german_postalcodes.geojson', 'r') as f:
-        d = json.load(f)
-
-        for feature in d['features']:
-            postal_codes.append(feature['properties']['postcode'])
-
-    return postal_codes
-
 
 def parse_entry_details(content):
-    doc = lxml.html.fromstring(content)
+    contact_data = {}
+    contact_data['website'] = ''
+    contact_data['mailAddress'] = ''
+
+    doc = html.fromstring(content)
     contact = doc.xpath('//div[@class="lnks"]')
+
+    if len(contact) == 0:
+        return contact_data
 
     mail = contact[0].xpath('./a[@class="mail"]')
     web = contact[0].xpath('./a[@class="www"]')
-
-    contact_data = {}
 
     for m in mail:
         if len(m.xpath('./@title')) > 0:
@@ -51,18 +45,16 @@ def parse_entry_details(content):
 
             break
 
-    if 'mailAddress' not in contact_data:
-        contact_data['mailAddress'] = ''
-
-    if 'website' not in contact_data:
-        contact_data['website'] = ''
-
     return contact_data
 
 
 def parse_entries(content):
-    doc = lxml.html.fromstring(content)
+    doc = html.fromstring(content)
     d = doc.xpath('//script[@type="application/ld+json"]/text()')
+
+    if len(d) == 0:
+        return None
+
     j = json.loads(d[0])
 
     return j['@graph']
@@ -81,7 +73,7 @@ def parse_hits(content):
 
 
 def parse_next_url(content):
-    doc = lxml.html.fromstring(content)
+    doc = html.fromstring(content)
     n = doc.xpath('//a[@title="zur nächsten Seite"]/@href')
 
     if len(n) > 0:
@@ -94,7 +86,7 @@ def parse_next_url(content):
 
 def download_document(url, headers):
     try:
-        r = requests.get(url, headers=headers, cookies={'CONSENT': 'YES+'})
+        r = httpx.get(url, headers=headers, cookies={'CONSENT': 'YES+'})
 
         return r.content
     except ConnectionError as e:
@@ -124,20 +116,25 @@ def write_json(entry, file_name):
 
 
 def make_file_name(query, postal_code):
-    if postal_code.isnumeric():
+    directory_path = Path.cwd() / 'data'
+    directory_path.mkdir(parents=True, exist_ok=True)
+
+    if postal_code:
         file_name = '{}_{}'.format(query.lower(), postal_code)
     else:
         file_name = '{}'.format(query.lower())
 
-    return 'data/{}.json'.format(file_name)
+    return f'data/{file_name}.json'
 
 
 def parse_entry(item):
     item.pop('aggregateRating') if 'aggregateRating' in item else item
 
     item['coordinates'] = []
-    item['coordinates'].append(float(item['geo']['latitude']))
-    item['coordinates'].append(float(item['geo']['longitude']))
+
+    if 'geo' in item:
+        item['coordinates'].append(float(item['geo']['latitude']))
+        item['coordinates'].append(float(item['geo']['longitude']))
 
     try:
         listing_postal_code = f'{item["address"]["postalCode"]:05d}'
@@ -151,29 +148,37 @@ def parse_entry(item):
         pass
 
     item.pop('url')
-    item.pop('geo')
     item.pop('@type')
     item['address'].pop('@type')
+
+    if 'geo' in item:
+        item.pop('geo')
 
     return item
 
 
-def aggregate(query, offset_value, postal_code):
+def aggregate(query, offset, postal_code):
     file_name = make_file_name(query, postal_code)
 
     ua = UserAgent()
     headers = { 'User-Agent': ua.random }
 
-    param = 'kw={}&ci={}&form_name=search_nat'.format(query, postal_code)
+    param = 'kw={}&form_name=search_nat'.format(query)
     url = 'https://www.dasoertliche.de?{}'.format(param)
 
-    if offset_value:
-        url = '{}&recFrom={}'.format(url, offset_value)
+    if offset:
+        url = '{}&recFrom={}'.format(url, offset)
+
+    if postal_code:
+        url = '{}&ci={}'.format(url, postal_code)
 
     while True:
         print('Next url {}\n'.format(url))
         document_tree = download_document(url, headers)
         entries = parse_entries(document_tree)
+
+        if not entries:
+            continue
 
         for entry in entries:
             keys = ['url', 'geo', 'address']
@@ -196,26 +201,12 @@ def aggregate(query, offset_value, postal_code):
             break
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Simple scraper')
-    parser.add_argument('--offset', dest='offset', type=int)
-    parser.add_argument('--query', dest='query', required=True)
-    parser.add_argument('--use-postal-codes', dest='use_postal_codes', action='store_true')
-
-    args = parser.parse_args()
-
-    if args.use_postal_codes:
-        postal_codes = german_postalcodes()
-
-        for postal_code in postal_codes:
-            aggregate(args.query, -1, postal_code)
-    else:
-        if 'offset' in args:
-            offset_value = args.offset
-        else:
-            offset_value = -1
-
-        aggregate(args.query, offset_value, '')
+@click.command()
+@click.option('-o', '--offset', type=int)
+@click.option('-q', '--query', required=True, type=str)
+@click.option('-p', '--postal-code', type=str)
+def main(offset, query, postal_code):
+    aggregate(query, offset, postal_code)
 
 
 if __name__ == '__main__':
