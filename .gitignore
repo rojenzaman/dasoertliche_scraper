@@ -2,3 +2,5 @@ venv/
 data/
 .idea/
 .DS_Store/
+output_datas/
+.crawler.log
